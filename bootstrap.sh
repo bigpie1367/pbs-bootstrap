@@ -26,11 +26,11 @@
 set -euo pipefail
 
 # --- Script-constant defaults (override via env before running) -------------
-: "${PBS_TEMPLATE:=debian-12-standard_12.7-1_amd64.tar.zst}"
+: "${PBS_TEMPLATE:=debian-12-standard_12.12-1_amd64.tar.zst}"
 : "${PBS_TEMPLATE_STORAGE:=local}"
 : "${PBS_REPO_URL:=https://github.com/bigpie1367/pbs-bootstrap}"
 : "${PBS_REPO_BRANCH:=main}"
-: "${PBS_STORAGE_TYPE:=b2}"          # b2 | s3
+: "${PBS_STORAGE_TYPE:=b2}"          # b2 | s3 — env wins; mismatch with config caught at config_export
 # PBS_STORAGE_ENDPOINT / PBS_STORAGE_REGION required when type=s3
 # PBS_ROOTFS_SIZE / PBS_ROOTFS_STORAGE / PBS_CORES / PBS_MEMORY_DEDICATED /
 # PBS_MEMORY_SWAP all come from bootstrap-config.yml (terraform outputs).
@@ -38,13 +38,12 @@ set -euo pipefail
 # --- Locate libs (curl|bash → auto-clone) -----------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || SCRIPT_DIR=""
 if [[ -z "$SCRIPT_DIR" || ! -d "$SCRIPT_DIR/lib" ]]; then
-    command -v git >/dev/null || {
-        echo "[bootstrap] git required to bootstrap from curl|bash — install with: apt install -y git" >&2
-        exit 1
-    }
-    echo "[bootstrap] no local lib/ found — cloning $PBS_REPO_URL"
+    # Download tarball — uses curl + tar (always present on PVE). Avoids
+    # making git a hard prereq just for the curl|bash bootstrap flow.
     TMP_CLONE="$(mktemp -d /tmp/pbs-bootstrap.XXXXXX)"
-    git clone --depth 1 --branch "$PBS_REPO_BRANCH" "$PBS_REPO_URL" "$TMP_CLONE" >/dev/null
+    echo "[bootstrap] fetching $PBS_REPO_URL @ $PBS_REPO_BRANCH"
+    curl -fsSL "${PBS_REPO_URL}/archive/refs/heads/${PBS_REPO_BRANCH}.tar.gz" \
+        | tar xz -C "$TMP_CLONE" --strip-components=1
     exec bash "$TMP_CLONE/bootstrap.sh" "$@"
 fi
 

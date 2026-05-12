@@ -58,12 +58,20 @@ config_export() {
     PBS_MEMORY_DEDICATED="$(yq -r '.pbs.memory_dedicated // ""' "$f")"
     PBS_MEMORY_SWAP="$(yq -r '.pbs.memory_swap // ""' "$f")"
 
-    # storage.* in the config can mirror the runtime PBS_STORAGE_TYPE/ENDPOINT/
-    # REGION but the operator-supplied env vars take priority (they reflect
-    # the live decision the operator just made, not the steady-state default).
-    : "${PBS_STORAGE_TYPE:=$(yq -r '.storage.type // "b2"' "$f")}"
-    : "${PBS_STORAGE_ENDPOINT:=$(yq -r '.storage.endpoint // ""' "$f")}"
-    : "${PBS_STORAGE_REGION:=$(yq -r '.storage.region // ""' "$f")}"
+    # storage.* in the config and the live PBS_STORAGE_TYPE env must agree —
+    # rclone_setup_host already ran with the env value, so a mismatch means
+    # rclone is configured for the wrong backend and would silently fail.
+    local cfg_type cfg_endpoint cfg_region
+    cfg_type="$(yq -r '.storage.type // "b2"' "$f")"
+    cfg_endpoint="$(yq -r '.storage.endpoint // ""' "$f")"
+    cfg_region="$(yq -r '.storage.region // ""' "$f")"
+
+    if [[ "$cfg_type" != "$PBS_STORAGE_TYPE" ]]; then
+        die "storage.type mismatch: config says '$cfg_type' but env/default is '$PBS_STORAGE_TYPE' — set PBS_STORAGE_TYPE=$cfg_type before running bootstrap"
+    fi
+
+    : "${PBS_STORAGE_ENDPOINT:=$cfg_endpoint}"
+    : "${PBS_STORAGE_REGION:=$cfg_region}"
     : "${PBS_CHUNKS_BUCKET:=$(yq -r '.storage.chunks_bucket // .b2.chunks_bucket // ""' "$f")}"
 
     local missing=()

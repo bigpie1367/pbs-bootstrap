@@ -20,10 +20,8 @@
 
 pbs_auth_setup() {
     log_info "ensuring PBS user $PBS_PVE_USER@pbs exists"
-    local user_exists
-    user_exists="$(pct exec "$PBS_VMID" -- proxmox-backup-manager user list --output-format json \
-        | grep -c "\"userid\":\"$PBS_PVE_USER@pbs\"" || true)"
-    if [[ "$user_exists" == "0" ]]; then
+    if ! pct exec "$PBS_VMID" -- proxmox-backup-manager user list --output-format json \
+        | jq -e --arg u "$PBS_PVE_USER@pbs" 'map(select(.userid == $u)) | length > 0' >/dev/null; then
         pct exec "$PBS_VMID" -- proxmox-backup-manager user create "$PBS_PVE_USER@pbs" \
             --comment "PVE backup push (managed by pbs-bootstrap)"
     fi

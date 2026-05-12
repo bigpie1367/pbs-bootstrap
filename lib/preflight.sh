@@ -37,7 +37,7 @@ preflight_check() {
     command -v pveversion >/dev/null \
         || die "pveversion not found — bootstrap.sh must run on a Proxmox VE host"
 
-    for cmd in pct pveam curl git awk; do
+    for cmd in pct pveam curl tar awk; do
         command -v "$cmd" >/dev/null || die "missing command: $cmd"
     done
 

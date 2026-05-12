@@ -185,9 +185,9 @@ _i_meta_credentials_if_needed() {
 _i_summary_and_confirm() {
     local meta_line
     if sources_need_meta_remote; then
-        meta_line="  meta key:       ********\n"
+        meta_line="  meta key:       ********"
     else
-        meta_line="  meta key:       (not needed for this source)\n"
+        meta_line="  meta key:       (not needed for this source)"
     fi
 
     local summary
@@ -196,7 +196,7 @@ About to bootstrap with:
 
   storage:        $PBS_STORAGE_TYPE${PBS_STORAGE_ENDPOINT:+ ($PBS_STORAGE_ENDPOINT)}
   chunks key:     ********
-$(printf '%b' "$meta_line")
+$meta_line
   config:         $PBS_CONFIG
   auth_keys:      $PBS_AUTH_KEYS
 
