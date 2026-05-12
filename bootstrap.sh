@@ -50,8 +50,12 @@ fi
 
 # shellcheck source=lib/log.sh
 source "$SCRIPT_DIR/lib/log.sh"
+# shellcheck source=lib/tui.sh
+source "$SCRIPT_DIR/lib/tui.sh"
 # shellcheck source=lib/source-resolver.sh
 source "$SCRIPT_DIR/lib/source-resolver.sh"
+# shellcheck source=lib/interactive.sh
+source "$SCRIPT_DIR/lib/interactive.sh"
 # shellcheck source=lib/preflight.sh
 source "$SCRIPT_DIR/lib/preflight.sh"
 # shellcheck source=lib/host-apt.sh
@@ -80,6 +84,12 @@ source "$SCRIPT_DIR/lib/pbs-auth.sh"
 source "$SCRIPT_DIR/lib/pve-storage.sh"
 
 # --- Pipeline ----------------------------------------------------------------
+
+# Interactive collection (TTY + whiptail) OR env-only validation.
+if [[ -t 0 ]] && command -v whiptail >/dev/null 2>&1; then
+    interactive_collect
+fi
+
 log_header "PBS bootstrap"
 preflight_check
 
