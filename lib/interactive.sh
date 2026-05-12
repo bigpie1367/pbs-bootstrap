@@ -48,11 +48,11 @@ _i_storage_backend() {
 
     if [[ "${PBS_STORAGE_TYPE:-b2}" == "s3" ]]; then
         [[ -n "${PBS_STORAGE_ENDPOINT:-}" ]] \
-            || PBS_STORAGE_ENDPOINT="$(tui_input "S3 endpoint" \
+            || PBS_STORAGE_ENDPOINT="$(tui_input_nonempty "S3 endpoint" \
                 "Full URL, e.g. https://s3.us-east-005.backblazeb2.com")" \
             || die "aborted at endpoint"
         [[ -n "${PBS_STORAGE_REGION:-}" ]] \
-            || PBS_STORAGE_REGION="$(tui_input "S3 region" \
+            || PBS_STORAGE_REGION="$(tui_input_nonempty "S3 region" \
                 "Region string, e.g. us-east-005")" \
             || die "aborted at region"
         export PBS_STORAGE_ENDPOINT PBS_STORAGE_REGION
@@ -62,11 +62,11 @@ _i_storage_backend() {
 
 _i_chunks_credentials() {
     [[ -n "${PBS_CHUNKS_KEY_ID:-}" ]] \
-        || PBS_CHUNKS_KEY_ID="$(tui_input "Chunks bucket — Key ID" \
+        || PBS_CHUNKS_KEY_ID="$(tui_input_nonempty "Chunks bucket — Key ID" \
             "Application key ID with READ access to your chunks bucket:")" \
         || die "aborted at chunks key id"
     [[ -n "${PBS_CHUNKS_KEY:-}" ]] \
-        || PBS_CHUNKS_KEY="$(tui_password "Chunks bucket — App Key" \
+        || PBS_CHUNKS_KEY="$(tui_password_nonempty "Chunks bucket — App Key" \
             "Application key secret (hidden):")" \
         || die "aborted at chunks key"
     export PBS_CHUNKS_KEY_ID PBS_CHUNKS_KEY
@@ -88,8 +88,8 @@ _i_config_source() {
     case "$choice" in
         github) PBS_CONFIG="$(_i_github_spec config)" ;;
         bucket) PBS_CONFIG="$(_i_bucket_uri config bootstrap-config.yml)" ;;
-        url)    PBS_CONFIG="$(tui_input "Config URL" "URL to bootstrap-config.yml:")" ;;
-        file)   PBS_CONFIG="$(tui_input "Local config path" "Absolute path:")" ;;
+        url)    PBS_CONFIG="$(tui_input_nonempty "Config URL" "URL to bootstrap-config.yml:")" ;;
+        file)   PBS_CONFIG="$(tui_input_nonempty "Local config path" "Absolute path:")" ;;
         paste)
             local tmp; tmp="$(mktemp /tmp/pbs-config.XXXXXX.yml)"
             tui_paste_capture "Paste bootstrap-config.yml" "$tmp"
@@ -116,11 +116,11 @@ _i_auth_keys_source() {
         || die "aborted at auth keys source"
 
     case "$choice" in
-        github-user) PBS_AUTH_KEYS="$(tui_input "GitHub user" "Username (the part before .keys):")" ;;
+        github-user) PBS_AUTH_KEYS="$(tui_input_nonempty "GitHub user" "Username (the part before .keys):")" ;;
         github-repo) PBS_AUTH_KEYS="$(_i_github_spec auth_keys)" ;;
         bucket)      PBS_AUTH_KEYS="$(_i_bucket_uri auth_keys authorized_keys)" ;;
-        url)         PBS_AUTH_KEYS="$(tui_input "Keys URL" "URL to authorized_keys:")" ;;
-        file)        PBS_AUTH_KEYS="$(tui_input "Local keys path" "Absolute path:")" ;;
+        url)         PBS_AUTH_KEYS="$(tui_input_nonempty "Keys URL" "URL to authorized_keys:")" ;;
+        file)        PBS_AUTH_KEYS="$(tui_input_nonempty "Local keys path" "Absolute path:")" ;;
         paste)
             local tmp; tmp="$(mktemp /tmp/pbs-keys.XXXXXX)"
             tui_paste_capture "Paste SSH public keys (one per line)" "$tmp"
@@ -138,11 +138,11 @@ _i_github_spec() {
     local repo branch path pat pat_var
     pat_var="PBS_$(echo "$kind" | tr '[:lower:]' '[:upper:]')_GITHUB_PAT"
 
-    repo="$(tui_input "GitHub repo" "owner/repo (e.g. myuser/homelab):")" \
+    repo="$(tui_input_nonempty "GitHub repo" "owner/repo (e.g. myuser/homelab):")" \
         || die "aborted at github repo"
-    branch="$(tui_input "GitHub branch" "Branch name:" "main")" \
+    branch="$(tui_input_nonempty "GitHub branch" "Branch name:" "main")" \
         || die "aborted at github branch"
-    path="$(tui_input "GitHub path" "Path inside the repo:" "bootstrap-config.yml")" \
+    path="$(tui_input_nonempty "GitHub path" "Path inside the repo:" "bootstrap-config.yml")" \
         || die "aborted at github path"
     pat="$(tui_password "GitHub PAT (private repo only)" \
         "Fine-grained Personal Access Token with Contents: read.
@@ -156,10 +156,10 @@ Leave empty for public repo.")" || true
 _i_bucket_uri() {
     local kind="$1" default_obj="$2"
     local bucket obj
-    bucket="$(tui_input "$kind — bucket name" \
+    bucket="$(tui_input_nonempty "$kind — bucket name" \
         "Meta bucket name (the one holding $default_obj):")" \
         || die "aborted at bucket name"
-    obj="$(tui_input "$kind — object key" \
+    obj="$(tui_input_nonempty "$kind — object key" \
         "Object key inside the bucket:" "$default_obj")" \
         || die "aborted at object key"
     echo "${PBS_STORAGE_TYPE:-b2}://$bucket/$obj"
@@ -169,11 +169,11 @@ _i_meta_credentials_if_needed() {
     sources_need_meta_remote || return 0
 
     [[ -n "${PBS_META_KEY_ID:-}" ]] \
-        || PBS_META_KEY_ID="$(tui_input "Meta bucket — Key ID" \
+        || PBS_META_KEY_ID="$(tui_input_nonempty "Meta bucket — Key ID" \
             "Application key ID with READ access to your meta bucket:")" \
         || die "aborted at meta key id"
     [[ -n "${PBS_META_KEY:-}" ]] \
-        || PBS_META_KEY="$(tui_password "Meta bucket — App Key" \
+        || PBS_META_KEY="$(tui_password_nonempty "Meta bucket — App Key" \
             "Application key secret (hidden):")" \
         || die "aborted at meta key"
     export PBS_META_KEY_ID PBS_META_KEY

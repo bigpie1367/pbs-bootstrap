@@ -69,11 +69,14 @@ network_shim_restore_lxc() {
 
     # pct set on a running container only updates the on-disk config — the
     # live network namespace keeps its boot-time gw (= our masquerade target).
-    # Once we tear down the masquerade (trap on exit), the live state would
-    # silently lose connectivity. Reboot so the kernel picks up the declared
-    # gw fresh.
-    log_info "rebooting LXC $PBS_VMID to apply declared net0"
-    pct reboot "$PBS_VMID"
+    # Once the masquerade is torn down by the EXIT trap, the live state
+    # silently loses connectivity. Cycle the container explicitly with
+    # shutdown→start (pct reboot is async and races with our wait loop —
+    # it can match the old container right before shutdown begins).
+    log_info "cycling LXC $PBS_VMID to apply declared net0"
+    pct shutdown "$PBS_VMID" --timeout 30 2>/dev/null \
+        || pct stop "$PBS_VMID" --force
+    pct start "$PBS_VMID"
 
     local i
     for i in {1..30}; do
@@ -83,7 +86,7 @@ network_shim_restore_lxc() {
         fi
         sleep 1
     done
-    log_warn "LXC not responsive after reboot — verify with: pct status $PBS_VMID"
+    log_warn "LXC not responsive after restart — verify with: pct status $PBS_VMID"
 }
 
 network_shim_teardown() {

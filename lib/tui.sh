@@ -22,6 +22,26 @@ tui_password() {
         --passwordbox "$2" 12 78 3>&1 1>&2 2>&3
 }
 
+# Same as tui_input but re-prompts on empty input until the user enters
+# something or cancels.
+tui_input_nonempty() {
+    local val
+    while :; do
+        val="$(tui_input "$@")" || return 1
+        [[ -n "$val" ]] && { echo "$val"; return 0; }
+        tui_msg "Empty input" "Value can't be empty. Press OK to try again."
+    done
+}
+
+tui_password_nonempty() {
+    local val
+    while :; do
+        val="$(tui_password "$@")" || return 1
+        [[ -n "$val" ]] && { echo "$val"; return 0; }
+        tui_msg "Empty input" "Value can't be empty. Press OK to try again."
+    done
+}
+
 # tui_radio TITLE PROMPT TAG1 LABEL1 TAG2 LABEL2 ... — first option is default-on.
 tui_radio() {
     local title="$1" prompt="$2"; shift 2
