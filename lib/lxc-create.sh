@@ -35,11 +35,12 @@ lxc_create() {
         extra_args+=(--nameserver "$PBS_DNS_OVERRIDE")
     fi
 
-    log_info "creating LXC $PBS_VMID ($PBS_HOSTNAME) rootfs=${PBS_ROOTFS_SIZE}GB@${PBS_ROOTFS_STORAGE} gw=$gateway"
+    log_info "creating LXC $PBS_VMID ($PBS_HOSTNAME) ${PBS_CORES}C/${PBS_MEMORY_DEDICATED}M+${PBS_MEMORY_SWAP}swap rootfs=${PBS_ROOTFS_SIZE}GB@${PBS_ROOTFS_STORAGE} gw=$gateway"
     pct create "$PBS_VMID" "$template_path" \
         --hostname "$PBS_HOSTNAME" \
         --cores "$PBS_CORES" \
-        --memory "$PBS_MEMORY" \
+        --memory "$PBS_MEMORY_DEDICATED" \
+        --swap "$PBS_MEMORY_SWAP" \
         --rootfs "${PBS_ROOTFS_STORAGE}:${PBS_ROOTFS_SIZE}" \
         --net0 "name=eth0,bridge=$PBS_BRIDGE,ip=$PBS_IP/$PBS_IP_CIDR,gw=$gateway" \
         --onboot 1 \

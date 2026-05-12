@@ -68,51 +68,21 @@ The script will:
 14. `pct set --net0` back to the declared gateway so the LXC's network config matches `bootstrap-config.yml`.
 15. Tear down the host-side MASQUERADE.
 
-When the script returns, PBS is fully wired into PVE — you can immediately browse backups in the PVE GUI and start restores.
+When the script returns, PBS is fully wired into PVE — you can immediately browse backups in the PVE GUI.
 
-### 5. Set the root password
+### 5. Confirm success
+
+Quick sanity in the PVE web shell:
 
 ```bash
-pct exec <vmid> -- passwd root
+pct status <vmid>                                              # → status: running
+pct exec <vmid> -- proxmox-backup-manager datastore list       # → your datastore
+pvesm status -storage pbs                                      # → active
 ```
 
-(VMID is printed at the end of the bootstrap run, or visible in `bootstrap-config.yml`.)
+PVE GUI: `Datacenter → Storage → pbs` should show your backup groups when browsed.
 
-### 6. Verify PBS ↔ PVE chain
-
-Open the PBS GUI at `https://<pbs-ip>:8007` (`root@pam`) and confirm:
-
-- [ ] Datastore appears in the sidebar with the expected name.
-- [ ] Backup groups list (VM/CT) shows your previous snapshots.
-
-Open the PVE GUI and confirm:
-
-- [ ] Storage `pbs` (or whatever `PBS_PVE_STORAGE_ID` you set) appears as a backup storage.
-- [ ] Browsing the `pbs` storage shows the same backup groups.
-
-If both look right, you're ready to restore.
-
-### 7. Restore the LAN firewall VM from PVE
-
-This is the critical first restore. While the LAN firewall VM is gone, the LXC has no outbound internet (only LAN-local reachability via the host's masquerade — which bootstrap has already torn down) and GHA / WireGuard can't reach the host to drive automation.
-
-In the PVE GUI:
-
-1. Browse the `pbs` storage, locate your firewall VM's last backup.
-2. Restore it to the appropriate node, keeping its original VMID and network config.
-3. Start it. Confirm it picks up its old LAN IP and starts answering.
-
-Once the firewall is back up the rest of the homelab regains internet and your normal IaC tooling can drive the recovery of everything else.
-
-### 8. Hand off to your IaC
-
-With the firewall back, run your normal `terraform apply` + ansible playbooks to:
-
-- Restore the remaining LXCs / VMs from PBS.
-- Re-arm B2 sync cron, prune / verify / GC schedules.
-- Set up notifications, monitoring, etc.
-
-In our homelab this is `ansible-playbook ansible/playbooks/pbs.yml` followed by the broader site-wide play.
+If all three check out, bootstrap is done. What you do next — restore order, GUI password, schedules, sync setup — is your operator playbook, not this script's concern.
 
 ## Troubleshooting
 

@@ -19,16 +19,14 @@ Designed for the case where you've lost everything except your B2 bucket: bare-m
 11. Adds a PBS storage entry to PVE (`/etc/pve/storage.cfg`) using the new token + the PBS TLS fingerprint.
 12. Restores the LXC's network to the declared steady-state gateway + tears down the host masquerade.
 
-After step 11 you have a working PVE → PBS chain. From the PVE GUI you can browse the restored backup groups and restore any VM/CT — typically your **LAN firewall VM first** so the rest of the homelab can be brought back by your normal IaC tooling.
+**Success criteria**: the script returns, and in PVE GUI you see the `pbs` storage with backups browsable. What you do with those backups — restore order, scheduling, etc. — is your operator playbook, out of this repo's scope.
 
-Out of scope (handled by your post-bootstrap ansible/terraform):
+Out of scope (operator / post-bootstrap):
 
-- Continuous B2 sync cron, prune / verify / GC schedules.
-- Datastore notification settings beyond the bare minimum.
-- GUI root password.
-- Restoring the LAN gateway VM itself.
-
-The scope is set by the DR chicken-and-egg: in a real disaster the LAN firewall is also down, so your normal automation (which depends on the firewall for VPN access) can't reach the host. Bootstrap does *just enough* in-place that you can use the PVE GUI to restore the firewall, and from there everything else follows.
+- Setting the PBS GUI root password.
+- Restoring any VM/CT (including the LAN firewall VM) from PBS.
+- Continuous B2 sync, prune / verify / GC schedules, notifications.
+- Anything that happens after PVE can see PBS.
 
 ## Requirements
 
@@ -95,8 +93,6 @@ Defaults are baked in as `: "${VAR:=default}"` shell expansions — override by 
 |-------------------------|-----------------------------------------------|-----------------------------------------------------------|
 | `PBS_TEMPLATE`          | `debian-12-standard_12.7-1_amd64.tar.zst`     | LXC template (must be available via `pveam`).             |
 | `PBS_TEMPLATE_STORAGE`  | `local`                                       | Storage holding the template.                              |
-| `PBS_MEMORY`            | `2048` (MB)                                   | LXC RAM allocation.                                        |
-| `PBS_CORES`             | `2`                                           | LXC CPU cores.                                             |
 | `PBS_IP_CIDR`           | `24`                                          | CIDR appended to the bare IP from config.                  |
 | `PBS_SSH_PUBKEY_FILE`   | _none_                                        | Optional fallback file for SSH keys if B2 mirror is empty. |
 | `PBS_META_BUCKET`       | `siroh-pbs-meta`                              | B2 bucket holding `bootstrap-config.yml` + `authorized_keys`. |
@@ -127,19 +123,12 @@ Prerequisite: the **Proxmox host itself** must have working internet that does n
 
 ## After bootstrap
 
-You should now have:
-- PBS LXC up, root password unset
-- Datastore registered, all backup groups visible in the PBS GUI
-- PBS API user + token created
-- PVE storage entry `pbs` wired to PBS with valid TLS fingerprint + token credentials
+The script finished successfully if all of these are true:
+- PBS LXC `<vmid>` is `running` (check `pct status`).
+- `proxmox-backup-manager datastore list` (run with `pct exec`) lists your datastore.
+- PVE GUI shows `pbs` under `Datacenter → Storage`, and clicking it lets you browse backup groups.
 
-Manual steps from here:
-
-1. Set the PBS GUI root password — `pct exec <vmid> -- passwd root`.
-2. Open the PVE GUI, find your LAN firewall VM under the `pbs` storage's backup browser, and restore it. Once that VM is up, the rest of the homelab gets internet back and your normal IaC (terraform + ansible) can take over.
-3. Restore everything else from PBS as needed.
-
-Your ongoing automation (B2 sync cron, prune/verify/GC schedules, monitoring, etc.) lives in your usual ansible role, not here. Apply it once GHA can reach the host again.
+From here it's your operator playbook. Bootstrap deliberately does not opine on restore order, schedules, sync setup, or anything that runs after PVE can see PBS — those are your responsibility.
 
 ## DR runbook
 

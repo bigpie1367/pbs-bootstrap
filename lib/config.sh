@@ -51,6 +51,9 @@ config_export() {
     PBS_DATASTORE_PATH="$(yq -r '.pbs.datastore_path // ""' "$f")"
     PBS_ROOTFS_SIZE="$(yq -r '.pbs.rootfs_size // ""' "$f")"
     PBS_ROOTFS_STORAGE="$(yq -r '.pbs.rootfs_storage // ""' "$f")"
+    PBS_CORES="$(yq -r '.pbs.cores // ""' "$f")"
+    PBS_MEMORY_DEDICATED="$(yq -r '.pbs.memory_dedicated // ""' "$f")"
+    PBS_MEMORY_SWAP="$(yq -r '.pbs.memory_swap // ""' "$f")"
     PBS_B2_CHUNKS_BUCKET="$(yq -r '.b2.chunks_bucket // ""' "$f")"
     PBS_B2_META_BUCKET="$(yq -r '.b2.meta_bucket // ""' "$f")"
 
@@ -58,6 +61,7 @@ config_export() {
     for v in PBS_VMID PBS_HOSTNAME PBS_BRIDGE PBS_IP PBS_GATEWAY \
              PBS_DATASTORE_NAME PBS_DATASTORE_PATH \
              PBS_ROOTFS_SIZE PBS_ROOTFS_STORAGE \
+             PBS_CORES PBS_MEMORY_DEDICATED PBS_MEMORY_SWAP \
              PBS_B2_CHUNKS_BUCKET PBS_B2_META_BUCKET; do
         [[ -n "${!v:-}" ]] || missing+=("$v")
     done
@@ -66,7 +70,8 @@ config_export() {
     export PBS_VMID PBS_HOSTNAME PBS_BRIDGE PBS_IP PBS_GATEWAY \
            PBS_DATASTORE_NAME PBS_DATASTORE_PATH \
            PBS_ROOTFS_SIZE PBS_ROOTFS_STORAGE \
+           PBS_CORES PBS_MEMORY_DEDICATED PBS_MEMORY_SWAP \
            PBS_B2_CHUNKS_BUCKET PBS_B2_META_BUCKET
 
-    log_info "config: vmid=$PBS_VMID host=$PBS_HOSTNAME ip=$PBS_IP rootfs=${PBS_ROOTFS_SIZE}GB@${PBS_ROOTFS_STORAGE} datastore=$PBS_DATASTORE_NAME"
+    log_info "config: vmid=$PBS_VMID host=$PBS_HOSTNAME ip=$PBS_IP ${PBS_CORES}C/${PBS_MEMORY_DEDICATED}M+${PBS_MEMORY_SWAP}swap rootfs=${PBS_ROOTFS_SIZE}GB@${PBS_ROOTFS_STORAGE} datastore=$PBS_DATASTORE_NAME"
 }
