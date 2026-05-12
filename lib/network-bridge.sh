@@ -59,11 +59,31 @@ network_shim_apply() {
 
 # Called at end of successful bootstrap — restores the LXC's gateway to the
 # value declared in bootstrap-config.yml so the running container matches
-# the source of truth. DNS stays at PBS_NAT_DNS until the real LAN gateway
-# is back and ansible / DHCP refreshes resolv.conf.
+# the source of truth, then reboots the LXC so the change actually applies
+# to the running kernel (pct set --net0 only edits config, not live state).
+# DNS stays at PBS_NAT_DNS until the real LAN gateway is back and ansible
+# / DHCP refreshes resolv.conf.
 network_shim_restore_lxc() {
-    log_info "restoring LXC gateway → $PBS_GATEWAY (declared)"
+    log_info "restoring LXC net0 → gw=$PBS_GATEWAY (declared)"
     pct set "$PBS_VMID" --net0 "name=eth0,bridge=$PBS_BRIDGE,ip=$PBS_IP/$PBS_IP_CIDR,gw=$PBS_GATEWAY"
+
+    # pct set on a running container only updates the on-disk config — the
+    # live network namespace keeps its boot-time gw (= our masquerade target).
+    # Once we tear down the masquerade (trap on exit), the live state would
+    # silently lose connectivity. Reboot so the kernel picks up the declared
+    # gw fresh.
+    log_info "rebooting LXC $PBS_VMID to apply declared net0"
+    pct reboot "$PBS_VMID"
+
+    local i
+    for i in {1..30}; do
+        if pct exec "$PBS_VMID" -- true 2>/dev/null; then
+            log_info "  LXC back up after ${i}s"
+            return 0
+        fi
+        sleep 1
+    done
+    log_warn "LXC not responsive after reboot — verify with: pct status $PBS_VMID"
 }
 
 network_shim_teardown() {

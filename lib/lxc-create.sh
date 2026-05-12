@@ -34,6 +34,11 @@ lxc_create() {
     if [[ -n "${PBS_DNS_OVERRIDE:-}" ]]; then
         extra_args+=(--nameserver "$PBS_DNS_OVERRIDE")
     fi
+    # PBS_AUTH_KEYS=skip resolves to an empty file. pct create rejects an
+    # empty --ssh-public-keys, so only pass it when we actually have keys.
+    if [[ -s "$AUTH_KEYS_FILE" ]]; then
+        extra_args+=(--ssh-public-keys "$AUTH_KEYS_FILE")
+    fi
 
     log_info "creating LXC $PBS_VMID ($PBS_HOSTNAME) ${PBS_CORES}C/${PBS_MEMORY_DEDICATED}M+${PBS_MEMORY_SWAP}swap rootfs=${PBS_ROOTFS_SIZE}GB@${PBS_ROOTFS_STORAGE} gw=$gateway"
     pct create "$PBS_VMID" "$template_path" \
@@ -46,7 +51,6 @@ lxc_create() {
         --onboot 1 \
         --unprivileged 1 \
         --features keyctl=1,nesting=0 \
-        --ssh-public-keys "$AUTH_KEYS_FILE" \
         "${extra_args[@]}" \
         --start 0
 
