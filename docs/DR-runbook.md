@@ -36,7 +36,21 @@ export B2_PBS_KEY='<chunks-app-key>'
 
 Do **not** save these to a file on disk. After the run, `unset` them.
 
-### 3. Run bootstrap
+In a true DR scenario these keys are unreachable from your homelab secret manager (which is also dead). Recovery is only possible if you stored them somewhere outside the homelab — a personal password manager, encrypted USB, or paper backup. If you have not done this yet and your homelab is still up, do it **now**.
+
+### 3. Verify host has internet (independent of LAN gateway)
+
+In a real disaster the LAN gateway (pfSense / OPNsense / etc.) is also gone, so the new PBS LXC won't have a path to B2 through it. Bootstrap works around this by NAT-ing LXC traffic through the Proxmox host — which only works if the **host** still has internet via a different upstream (consumer router, ISP modem, etc.).
+
+Confirm before continuing:
+
+```bash
+curl -I https://api.backblazeb2.com
+```
+
+If that fails, the host itself is offline. Fix that before running bootstrap — neither the script nor any other DR step can do anything useful until the host can reach B2.
+
+### 4. Run bootstrap
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/bigpie1367/pbs-bootstrap/main/bootstrap.sh | bash
@@ -46,13 +60,20 @@ The script will:
 
 1. Validate env + deps (a few seconds).
 2. Install rclone on the host and pull `bootstrap-config.yml`.
-3. Download the Debian template if missing.
-4. `pct create` the LXC and start it.
-5. Install PBS inside the LXC.
-6. **Restore chunks** — this is the long part. Expect 10s of minutes to many hours depending on bucket size and your egress.
-7. Write `datastore.cfg` and reload the proxy.
+3. Apply the temporary host-side NAT (so the new LXC has a path to B2 even with the LAN firewall down).
+4. Download the Debian template if missing.
+5. `pct create` the LXC and start it (with `gw=<host bridge IP>`, `--nameserver 1.1.1.1`).
+6. Install PBS inside the LXC.
+7. **Restore chunks** — long-running. Expect 10s of minutes to many hours depending on bucket size and your egress.
+8. Register the datastore by writing `/etc/proxmox-backup/datastore.cfg` and reloading the proxy.
+9. Create the PBS API user + token + `DatastoreAdmin` ACL.
+10. Add the PVE storage entry pointing at PBS (with the freshly-captured token + TLS fingerprint).
+11. `pct set --net0` back to the declared gateway so the LXC's network config matches `bootstrap-config.yml`.
+12. Tear down the host-side NAT.
 
-### 4. Set the root password
+When the script returns, PBS is fully wired into PVE — you can immediately browse backups in the PVE GUI and start restores.
+
+### 5. Set the root password
 
 ```bash
 pct exec <vmid> -- passwd root
@@ -60,28 +81,41 @@ pct exec <vmid> -- passwd root
 
 (VMID is printed at the end of the bootstrap run, or visible in `bootstrap-config.yml`.)
 
-### 5. Verify
+### 6. Verify PBS ↔ PVE chain
 
-Open `https://<pbs-ip>:8007` in a browser. Log in as `root@pam`. Check:
+Open the PBS GUI at `https://<pbs-ip>:8007` (`root@pam`) and confirm:
 
-- [ ] Datastore appears in the sidebar.
-- [ ] Backup groups list (VMs / CTs) shows all your previous snapshots.
-- [ ] Pick one snapshot, browse it — files should be readable.
-- [ ] `proxmox-backup-manager garbage-collection list` returns the datastore (no errors).
+- [ ] Datastore appears in the sidebar with the expected name.
+- [ ] Backup groups list (VM/CT) shows your previous snapshots.
 
-### 6. Re-integrate with PVE (homelab-specific)
+Open the PVE GUI and confirm:
 
-If you also lost your PVE storage entry, run the homelab ansible role to recreate the API user / token and update `/etc/pve/storage.cfg` with the new TLS fingerprint:
+- [ ] Storage `pbs` (or whatever `PBS_PVE_STORAGE_ID` you set) appears as a backup storage.
+- [ ] Browsing the `pbs` storage shows the same backup groups.
 
-```bash
-cd ~/homelab
-ansible-playbook ansible/playbooks/pbs.yml
-```
+If both look right, you're ready to restore.
 
-### 7. Re-arm scheduled tasks
+### 7. Restore the LAN firewall VM from PVE
 
-- Prune / verify / GC schedules are written by the homelab ansible role, not bootstrap. Run the role.
-- B2 sync cron likewise.
+This is the critical first restore. While the LAN firewall VM is gone, the LXC has no outbound internet (only LAN-local reachability via the host's masquerade — which bootstrap has already torn down) and GHA / WireGuard can't reach the host to drive automation.
+
+In the PVE GUI:
+
+1. Browse the `pbs` storage, locate your firewall VM's last backup.
+2. Restore it to the appropriate node, keeping its original VMID and network config.
+3. Start it. Confirm it picks up its old LAN IP and starts answering.
+
+Once the firewall is back up the rest of the homelab regains internet and your normal IaC tooling can drive the recovery of everything else.
+
+### 8. Hand off to your IaC
+
+With the firewall back, run your normal `terraform apply` + ansible playbooks to:
+
+- Restore the remaining LXCs / VMs from PBS.
+- Re-arm B2 sync cron, prune / verify / GC schedules.
+- Set up notifications, monitoring, etc.
+
+In our homelab this is `ansible-playbook ansible/playbooks/pbs.yml` followed by the broader site-wide play.
 
 ## Troubleshooting
 

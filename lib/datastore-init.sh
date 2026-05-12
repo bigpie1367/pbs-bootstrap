@@ -6,6 +6,13 @@
 #   The CLI form initializes a fresh layout (creates .chunks/, locks, etc.) and
 #   refuses a non-empty target. We already have the restored layout on disk, so
 #   we just declare it via the section config — PBS picks it up on proxy reload.
+#
+# Why is this in scope (vs leaving it to ansible)?
+#   In a full DR, the LAN firewall VM (pfSense / OPNsense / …) is also down,
+#   so the homelab GHA → WireGuard → ansible path is blocked. The operator
+#   needs PVE to see the PBS datastore so they can restore the firewall VM
+#   from the PVE GUI manually — which requires the datastore to be registered
+#   here before bootstrap exits.
 
 : "${PBS_GC_SCHEDULE:=4:00}"
 : "${PBS_NOTIFICATION_MODE:=notification-system}"

@@ -4,6 +4,12 @@
 # - Force IPv4 (Debian 12 LXCs on many networks have broken IPv6 default routes).
 # - Use the no-subscription repo (free).
 # - Remove the enterprise repo to avoid 401 on subsequent apt updates.
+#
+# Why this is in scope: chunks restored from B2 are only readable by PBS once
+# the proxmox-backup-server package is installed (creates the `backup` user
+# whose ownership chunks-restore.sh restores). Without PBS installed the
+# datastore directory is just files on disk — not usable as backup storage.
+# Registering the datastore (writing datastore.cfg) is left to ansible.
 
 pbs_install() {
     log_info "configuring apt inside LXC (ForceIPv4, no-subscription repo)"

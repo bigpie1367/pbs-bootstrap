@@ -19,17 +19,24 @@ lxc_create() {
         pveam download "$PBS_TEMPLATE_STORAGE" "$PBS_TEMPLATE"
     fi
 
-    log_info "creating LXC $PBS_VMID ($PBS_HOSTNAME)"
+    local gateway="${PBS_GATEWAY_OVERRIDE:-$PBS_GATEWAY}"
+    local extra_args=()
+    if [[ -n "${PBS_DNS_OVERRIDE:-}" ]]; then
+        extra_args+=(--nameserver "$PBS_DNS_OVERRIDE")
+    fi
+
+    log_info "creating LXC $PBS_VMID ($PBS_HOSTNAME) gw=$gateway"
     pct create "$PBS_VMID" "$template_path" \
         --hostname "$PBS_HOSTNAME" \
         --cores "$PBS_CORES" \
         --memory "$PBS_MEMORY" \
         --rootfs "$PBS_ROOTFS_STORAGE:$PBS_ROOTFS_SIZE" \
-        --net0 "name=eth0,bridge=$PBS_BRIDGE,ip=$PBS_IP/$PBS_IP_CIDR,gw=$PBS_GATEWAY" \
+        --net0 "name=eth0,bridge=$PBS_BRIDGE,ip=$PBS_IP/$PBS_IP_CIDR,gw=$gateway" \
         --onboot 1 \
         --unprivileged 1 \
         --features keyctl=1,nesting=0 \
         --ssh-public-keys "$PBS_SSH_PUBKEY_FILE" \
+        "${extra_args[@]}" \
         --start 0
 
     log_info "starting LXC $PBS_VMID"

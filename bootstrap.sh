@@ -44,6 +44,8 @@ source "$SCRIPT_DIR/lib/preflight.sh"
 source "$SCRIPT_DIR/lib/config.sh"
 # shellcheck source=lib/rclone-setup.sh
 source "$SCRIPT_DIR/lib/rclone-setup.sh"
+# shellcheck source=lib/network-bridge.sh
+source "$SCRIPT_DIR/lib/network-bridge.sh"
 # shellcheck source=lib/lxc-create.sh
 source "$SCRIPT_DIR/lib/lxc-create.sh"
 # shellcheck source=lib/pbs-install.sh
@@ -52,17 +54,27 @@ source "$SCRIPT_DIR/lib/pbs-install.sh"
 source "$SCRIPT_DIR/lib/chunks-restore.sh"
 # shellcheck source=lib/datastore-init.sh
 source "$SCRIPT_DIR/lib/datastore-init.sh"
+# shellcheck source=lib/pbs-auth.sh
+source "$SCRIPT_DIR/lib/pbs-auth.sh"
+# shellcheck source=lib/pve-storage.sh
+source "$SCRIPT_DIR/lib/pve-storage.sh"
 
 # --- Pipeline ----------------------------------------------------------------
 log_header "PBS bootstrap"
 preflight_check
 
 CONFIG_FILE="$(mktemp /tmp/pbs-bootstrap-config.XXXXXX.yml)"
-trap 'rm -f "$CONFIG_FILE"' EXIT
+cleanup() {
+    rm -f "$CONFIG_FILE" 2>/dev/null || true
+    network_shim_teardown
+}
+trap cleanup EXIT
 
 rclone_setup_host
 config_pull "$CONFIG_FILE"
 config_export "$CONFIG_FILE"
+
+network_shim_apply
 
 log_header "Recreating PBS LXC $PBS_VMID"
 lxc_create
@@ -74,10 +86,22 @@ pbs_install
 log_header "Restoring chunks from B2 (foreground — long-running)"
 chunks_restore
 
-log_header "Initializing datastore $PBS_DATASTORE_NAME"
+log_header "Registering datastore $PBS_DATASTORE_NAME with PBS"
 datastore_init
 
+log_header "Setting up PBS API user / token / ACL"
+pbs_auth_setup
+
+log_header "Wiring PVE storage entry to PBS"
+pve_storage_sync
+
+log_header "Restoring LXC network to declared state"
+network_shim_restore_lxc
+
 log_header "Done"
-log_info "PBS LXC $PBS_VMID is up at $PBS_IP"
-log_info "GUI: https://$PBS_IP:8007"
-log_info "Next: set root password — pct exec $PBS_VMID -- passwd root"
+log_info "PBS LXC $PBS_VMID is up at $PBS_IP, datastore $PBS_DATASTORE_NAME registered"
+log_info "GUI: https://$PBS_IP:8007  (root password not set — pct exec $PBS_VMID -- passwd root)"
+log_info ""
+log_info "PVE storage entry '$PBS_PVE_STORAGE_ID' is wired with token '$PBS_TOKEN_USERNAME'."
+log_info "Open PVE GUI and restore your LAN firewall VM (pfSense / OPNsense / …) from PBS."
+log_info "Once that VM is up, the rest of the homelab can be brought back by GHA + ansible."
