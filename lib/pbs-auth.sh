@@ -41,13 +41,13 @@ pbs_auth_setup() {
     token_raw="$(pct exec "$PBS_VMID" -- proxmox-backup-manager user generate-token \
         "$PBS_PVE_USER@pbs" "$PBS_PVE_TOKEN_NAME")"
 
-    # Strip "Result: " prefix → JSON → .value
+    # Strip "Result: " prefix → JSON → .value (jq comes installed via yq dep)
     PBS_TOKEN_USERNAME="$PBS_PVE_USER@pbs!$PBS_PVE_TOKEN_NAME"
-    PBS_TOKEN_VALUE="$(echo "$token_raw" | sed -E 's/^Result:[[:space:]]*//' \
-        | grep -oE '"value":"[^"]+"' | head -1 | sed -E 's/^"value":"([^"]+)"$/\1/')"
+    PBS_TOKEN_VALUE="$(echo "$token_raw" | sed -E 's/^Result:[[:space:]]*//' | jq -r '.value')"
     export PBS_TOKEN_USERNAME PBS_TOKEN_VALUE
 
-    [[ -n "$PBS_TOKEN_VALUE" ]] || die "failed to parse token value from PBS CLI output"
+    [[ -n "$PBS_TOKEN_VALUE" && "$PBS_TOKEN_VALUE" != "null" ]] \
+        || die "failed to parse token value from PBS CLI output"
 
     log_info "granting $PBS_PVE_ROLE on /datastore/$PBS_DATASTORE_NAME to token"
     pct exec "$PBS_VMID" -- proxmox-backup-manager acl update \

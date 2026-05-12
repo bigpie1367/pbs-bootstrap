@@ -77,24 +77,28 @@ network_shim_teardown() {
 }
 
 # Compute the network-portion of IP/CIDR (e.g. 10.80.60.200/24 → 10.80.60.0/24).
-# /24 fast path covers the homelab case. Other CIDRs fall back to ipcalc-ng if
-# available — anything else is rejected loudly rather than silently miscomputing.
+# Pure bash, any CIDR in /0..32. No external deps (ipcalc-ng etc).
 _subnet_v4() {
     local ip="$1" cidr="$2"
-    case "$cidr" in
-        24)
-            local IFS=.
-            local a b c d
-            read -r a b c d <<<"$ip"
-            : "$d"
-            echo "$a.$b.$c.0/24"
-            ;;
-        *)
-            if command -v ipcalc-ng >/dev/null; then
-                ipcalc-ng -n "$ip/$cidr" | awk -F= '/^NETWORK=/{print $2}'
-            else
-                die "subnet calc for /$cidr needs ipcalc-ng (apt install ipcalc-ng) or use /24"
-            fi
-            ;;
-    esac
+    local IFS=.
+    local -a o
+    read -r -a o <<<"$ip"
+    (( ${#o[@]} == 4 )) || { echo ""; return 1; }
+    (( cidr >= 0 && cidr <= 32 )) || { echo ""; return 1; }
+
+    local ip_int=$(( (o[0]<<24) | (o[1]<<16) | (o[2]<<8) | o[3] ))
+    local mask
+    if (( cidr == 0 )); then
+        mask=0
+    else
+        mask=$(( 0xFFFFFFFF << (32 - cidr) & 0xFFFFFFFF ))
+    fi
+    local net=$(( ip_int & mask ))
+
+    printf "%d.%d.%d.%d/%d\n" \
+        $(( (net>>24) & 0xFF )) \
+        $(( (net>>16) & 0xFF )) \
+        $(( (net>>8)  & 0xFF )) \
+        $((  net      & 0xFF )) \
+        "$cidr"
 }

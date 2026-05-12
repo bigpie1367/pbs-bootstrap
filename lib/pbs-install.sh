@@ -18,11 +18,21 @@ echo 'Acquire::ForceIPv4 "true";' >/etc/apt/apt.conf.d/99force-ipv4
 apt-get update -qq
 apt-get install -y -qq curl gnupg ca-certificates
 
+# Modern keyring location (/etc/apt/trusted.gpg.d/ is deprecated in trixie+).
+# Pin the repo to this specific key via Signed-By so other keyrings can't
+# vouch for the same repo.
+mkdir -p /etc/apt/keyrings
 curl -fsSL https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg \
-    -o /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg
-echo "deb http://download.proxmox.com/debian/pbs bookworm pbs-no-subscription" \
-    >/etc/apt/sources.list.d/pbs-no-subscription.list
-rm -f /etc/apt/sources.list.d/pbs-enterprise.list
+    -o /etc/apt/keyrings/proxmox-release-bookworm.gpg
+chmod 0644 /etc/apt/keyrings/proxmox-release-bookworm.gpg
+
+cat >/etc/apt/sources.list.d/pbs-no-subscription.list <<'SRC'
+deb [signed-by=/etc/apt/keyrings/proxmox-release-bookworm.gpg] http://download.proxmox.com/debian/pbs bookworm pbs-no-subscription
+SRC
+
+# Migrate from the legacy keyring path if a previous bootstrap left it.
+rm -f /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg \
+      /etc/apt/sources.list.d/pbs-enterprise.list
 
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq proxmox-backup-server

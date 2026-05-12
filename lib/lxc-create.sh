@@ -55,14 +55,36 @@ lxc_create() {
 }
 
 lxc_wait_network() {
-    log_info "waiting for LXC network"
+    log_info "waiting for LXC $PBS_VMID network"
     local i
+
+    # Stage 1: pct exec working (container init ready)
+    for i in {1..60}; do
+        if pct exec "$PBS_VMID" -- true 2>/dev/null; then
+            log_info "  pct exec ready after ${i}s"
+            break
+        fi
+        sleep 1
+        (( i == 60 )) && die "pct exec never succeeded — check pct status $PBS_VMID + pct enter $PBS_VMID"
+    done
+
+    # Stage 2: IPv4 default route present
     for i in {1..30}; do
-        if pct exec "$PBS_VMID" -- sh -c 'getent hosts deb.debian.org >/dev/null 2>&1'; then
-            log_info "network up after ${i}s"
+        if pct exec "$PBS_VMID" -- ip -4 route show default 2>/dev/null | grep -q .; then
+            log_info "  IPv4 default route present after ${i}s"
+            break
+        fi
+        sleep 1
+        (( i == 30 )) && die "LXC has no IPv4 default route — check pct exec $PBS_VMID -- ip -4 route"
+    done
+
+    # Stage 3: DNS resolution working
+    for i in {1..30}; do
+        if pct exec "$PBS_VMID" -- getent hosts deb.debian.org >/dev/null 2>&1; then
+            log_info "  DNS resolving after ${i}s"
             return 0
         fi
         sleep 1
     done
-    die "LXC network never came up — check pct exec $PBS_VMID -- ip a"
+    die "LXC DNS never resolved — check pct exec $PBS_VMID -- cat /etc/resolv.conf"
 }
