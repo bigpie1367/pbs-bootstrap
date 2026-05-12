@@ -22,15 +22,24 @@ bash <(curl -sSL https://raw.githubusercontent.com/bigpie1367/pbs-bootstrap/main
 
 ## 파이프라인
 
-```mermaid
-flowchart TB
-    P1[preflight + 호스트 apt] --> P2[config.yml fetch]
-    P2 --> P3[호스트 네트워크<br/>vmbr1, masquerade]
-    P3 --> P4[pct create LXC + PBS 설치]
-    P4 --> P5[chunks 복원<br/>long-running]
-    P5 --> P6[datastore 등록 + ACL]
-    P6 --> P7[PVE storage entry + LXC 네트워크 원복]
-```
+| # | 단계 | 하는 일 | 시간 |
+|---|---|---|---|
+| 1 | preflight | env vars / 의존성 / PVE 호스트 검증 | <1s |
+| 2 | host-apt | `pve-enterprise` → `pve-no-subscription` 교체, `rclone yq iptables ifupdown2` 설치 | ~30s |
+| 3 | rclone-setup | `/root/.config/rclone/rclone.conf` 작성 (chunks + 선택적 meta remote) | <1s |
+| 4 | config-pull | `PBS_CONFIG` 해석 → `/tmp/bootstrap-config.yml` (b2/s3/github/url/file/paste) | <2s |
+| 5 | host-network | `host.bridges[*]` 별로 `/etc/network/interfaces.d/<bridge>.conf` 렌더 + `ifreload -a` (vmbr0 안 건드림) | ~5s |
+| 6 | auth-keys | `PBS_AUTH_KEYS` 해석 → 호스트 `/root/.ssh/authorized_keys` + LXC 주입용 stage | <2s |
+| 7 | network-shim | `sysctl ip_forward=1` + `iptables -t nat MASQUERADE` (LXC subnet → vmbr0) | <1s |
+| 8 | lxc-create | 템플릿 없으면 `pveam download`, `pct create` + `pct start` (gateway/DNS override) | ~30s |
+| 9 | pbs-install | LXC 안: ForceIPv4 apt, `pve-no-subscription`, `proxmox-backup-server` 설치 | ~1–2분 |
+| 10 | chunks-restore | LXC 안: `rclone copy chunks:<bucket> <datastore-path>`, `chown -R backup:backup` | **수 시간** |
+| 11 | datastore-init | `/etc/proxmox-backup/datastore.cfg` 작성, `proxmox-backup-proxy` reload | <2s |
+| 12 | pbs-auth | `proxmox-backup-manager user create` + `generate-token` + `acl update` (DatastoreAdmin) | ~5s |
+| 13 | pve-storage | PBS TLS fingerprint 추출, `pvesm add\|set pbs --server <ip> --fingerprint … --username …` | ~3s |
+| 14 | network-restore | `pct set --net0 gw=<declared>`, iptables/sysctl trap teardown | <2s |
+
+10번이 wall-clock 의 대부분 (chunks bucket 크기 × egress 대역폭). 나머진 다 초 단위.
 
 ## `bootstrap-config.yml`
 

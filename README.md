@@ -22,15 +22,24 @@ Answer the prompts. Done when `pvesm status -storage pbs` is `active` and the PV
 
 ## Pipeline
 
-```mermaid
-flowchart TB
-    P1[preflight + host apt] --> P2[fetch config.yml]
-    P2 --> P3[host network<br/>vmbr1, masquerade]
-    P3 --> P4[pct create LXC + PBS install]
-    P4 --> P5[restore chunks<br/>long-running]
-    P5 --> P6[register datastore + ACL]
-    P6 --> P7[wire PVE storage + restore LXC net]
-```
+| # | Stage | What it does | Time |
+|---|---|---|---|
+| 1 | preflight | validate env vars / required deps / PVE host | <1s |
+| 2 | host-apt | swap `pve-enterprise` → `pve-no-subscription`, install `rclone yq iptables ifupdown2` | ~30s |
+| 3 | rclone-setup | write `/root/.config/rclone/rclone.conf` (chunks + optional meta remote) | <1s |
+| 4 | config-pull | resolve `PBS_CONFIG` → `/tmp/bootstrap-config.yml` (b2/s3/github/url/file/paste) | <2s |
+| 5 | host-network | render `/etc/network/interfaces.d/<bridge>.conf` for each `host.bridges[*]`, `ifreload -a` (vmbr0 untouched) | ~5s |
+| 6 | auth-keys | resolve `PBS_AUTH_KEYS` → host `/root/.ssh/authorized_keys` + stage for LXC injection | <2s |
+| 7 | network-shim | `sysctl ip_forward=1` + `iptables -t nat MASQUERADE` for LXC subnet → vmbr0 | <1s |
+| 8 | lxc-create | `pveam download` template if missing, `pct create` + `pct start` (gateway/DNS overridden) | ~30s |
+| 9 | pbs-install | inside LXC: ForceIPv4 apt, `pve-no-subscription`, install `proxmox-backup-server` | ~1–2min |
+| 10 | chunks-restore | inside LXC: `rclone copy chunks:<bucket> <datastore-path>`, `chown -R backup:backup` | **hours** |
+| 11 | datastore-init | write `/etc/proxmox-backup/datastore.cfg`, reload `proxmox-backup-proxy` | <2s |
+| 12 | pbs-auth | `proxmox-backup-manager user create` + `generate-token` + `acl update` (DatastoreAdmin) | ~5s |
+| 13 | pve-storage | extract PBS TLS fingerprint, `pvesm add\|set pbs --server <ip> --fingerprint … --username …` | ~3s |
+| 14 | network-restore | `pct set --net0 gw=<declared>`, then iptables/sysctl teardown via trap | <2s |
+
+10 dominates wall-clock (chunks bucket size × egress bandwidth). Everything else is seconds to a minute.
 
 ## `bootstrap-config.yml`
 
