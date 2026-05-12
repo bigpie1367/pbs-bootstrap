@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # pbs-bootstrap — disaster-recover a Proxmox Backup Server LXC from B2 cold storage.
 #
-# Usage (on Proxmox host):
+# Designed for the worst case: fresh PVE bare-metal install, LAN firewall VM
+# (pfSense / OPNsense / …) also gone. Operator needs nothing in the homelab
+# except B2 credentials. Bootstrap brings the PBS LXC up and wires it into
+# PVE so the operator can do the first restore (typically the LAN firewall)
+# from the PVE GUI — after which normal IaC takes over.
+#
+# Usage (on Proxmox host, web shell or SSH):
 #   export B2_PBS_META_KEY_ID=... B2_PBS_META_KEY=...
 #   export B2_PBS_KEY_ID=...      B2_PBS_KEY=...
 #   curl -sSL https://raw.githubusercontent.com/bigpie1367/pbs-bootstrap/main/bootstrap.sh | bash
@@ -15,13 +21,12 @@ set -euo pipefail
 # --- Script-constant defaults (override via env before running) -------------
 : "${PBS_TEMPLATE:=debian-12-standard_12.7-1_amd64.tar.zst}"
 : "${PBS_TEMPLATE_STORAGE:=local}"
-: "${PBS_ROOTFS_STORAGE:=local-lvm}"
-: "${PBS_ROOTFS_SIZE:=64}"          # GB — must hold restored chunks
 : "${PBS_MEMORY:=2048}"             # MB
 : "${PBS_CORES:=2}"
-: "${PBS_SSH_PUBKEY_FILE:=$HOME/.ssh/authorized_keys}"
 : "${PBS_REPO_URL:=https://github.com/bigpie1367/pbs-bootstrap}"
 : "${PBS_REPO_BRANCH:=main}"
+# PBS_ROOTFS_SIZE / PBS_ROOTFS_STORAGE come from bootstrap-config.yml (terraform)
+# PBS_SSH_PUBKEY_FILE is an optional fallback when B2 mirror is missing
 
 # --- Locate libs (curl|bash → auto-clone) -----------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || SCRIPT_DIR=""
@@ -40,10 +45,16 @@ fi
 source "$SCRIPT_DIR/lib/log.sh"
 # shellcheck source=lib/preflight.sh
 source "$SCRIPT_DIR/lib/preflight.sh"
-# shellcheck source=lib/config.sh
-source "$SCRIPT_DIR/lib/config.sh"
+# shellcheck source=lib/host-apt.sh
+source "$SCRIPT_DIR/lib/host-apt.sh"
 # shellcheck source=lib/rclone-setup.sh
 source "$SCRIPT_DIR/lib/rclone-setup.sh"
+# shellcheck source=lib/config.sh
+source "$SCRIPT_DIR/lib/config.sh"
+# shellcheck source=lib/host-network.sh
+source "$SCRIPT_DIR/lib/host-network.sh"
+# shellcheck source=lib/host-ssh.sh
+source "$SCRIPT_DIR/lib/host-ssh.sh"
 # shellcheck source=lib/network-bridge.sh
 source "$SCRIPT_DIR/lib/network-bridge.sh"
 # shellcheck source=lib/lxc-create.sh
@@ -66,14 +77,29 @@ preflight_check
 CONFIG_FILE="$(mktemp /tmp/pbs-bootstrap-config.XXXXXX.yml)"
 cleanup() {
     rm -f "$CONFIG_FILE" 2>/dev/null || true
+    rm -f "${AUTH_KEYS_FILE:-}" 2>/dev/null || true
     network_shim_teardown
 }
 trap cleanup EXIT
 
+log_header "Fixing host apt repos + installing bootstrap deps"
+host_apt_setup
+
+log_header "Configuring rclone on host"
 rclone_setup_host
+
+log_header "Pulling bootstrap-config.yml from B2"
 config_pull "$CONFIG_FILE"
 config_export "$CONFIG_FILE"
 
+log_header "Configuring host network bridges"
+host_network_setup
+
+log_header "Fetching operator SSH keys from B2"
+fetch_authorized_keys
+install_authorized_keys_on_host
+
+log_header "Applying network shim (host masquerade for LXC)"
 network_shim_apply
 
 log_header "Recreating PBS LXC $PBS_VMID"

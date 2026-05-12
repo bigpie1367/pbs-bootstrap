@@ -6,24 +6,18 @@ Use this when the PBS LXC is gone (host wiped, container destroyed, storage lost
 
 Before you start, gather:
 
-- [ ] **B2 credentials** — two key pairs (meta bucket, chunks bucket). If you don't have these, recovery is impossible — you can't get past step 1.
-- [ ] **Proxmox host** — fresh or existing, reachable on the network with the same bridge/gateway as the lost LXC.
-- [ ] **SSH access** to the Proxmox host.
-- [ ] **Enough free storage** for the rootfs (default 64 GB) on the LXC's backing pool.
+- [ ] **B2 credentials** — two key pairs (meta bucket, chunks bucket). If you don't have these, recovery is impossible.
+- [ ] **Proxmox host** — fresh PVE bare-metal install. During the installer ceremony, set vmbr0 IP / gateway so the host can reach the internet via your upstream router (NOT the LAN firewall VM you're recovering from).
+- [ ] **PVE web shell or console** access — root password set during install. SSH key access on the host isn't needed: bootstrap will install the operator keys from B2 mirror as it runs.
+- [ ] **Enough free storage** for the LXC rootfs on the storage pool referenced in `bootstrap-config.yml` (homelab default: 100 GB on `local`).
 
 ## Step-by-step
 
-### 1. SSH to the Proxmox host
+### 1. Open a shell on the Proxmox host
 
-```bash
-ssh root@<proxmox-host>
-```
+Browser → `https://<vmbr0-ip>:8006` → log in as `root@pam` → click the host node → **Shell**.
 
-Start a `tmux` or `screen` session — chunk restore is long-running and you don't want a dropped SSH connection to interrupt it.
-
-```bash
-tmux new -s pbs-recover
-```
+All subsequent commands run in this shell. It survives across PVE GUI navigation, and chunk restore (long-running) is safe inside it.
 
 ### 2. Export B2 credentials
 
@@ -58,18 +52,21 @@ curl -sSL https://raw.githubusercontent.com/bigpie1367/pbs-bootstrap/main/bootst
 
 The script will:
 
-1. Validate env + deps (a few seconds).
-2. Install rclone on the host and pull `bootstrap-config.yml`.
-3. Apply the temporary host-side NAT (so the new LXC has a path to B2 even with the LAN firewall down).
-4. Download the Debian template if missing.
-5. `pct create` the LXC and start it (with `gw=<host bridge IP>`, `--nameserver 1.1.1.1`).
-6. Install PBS inside the LXC.
-7. **Restore chunks** — long-running. Expect 10s of minutes to many hours depending on bucket size and your egress.
-8. Register the datastore by writing `/etc/proxmox-backup/datastore.cfg` and reloading the proxy.
-9. Create the PBS API user + token + `DatastoreAdmin` ACL.
-10. Add the PVE storage entry pointing at PBS (with the freshly-captured token + TLS fingerprint).
-11. `pct set --net0` back to the declared gateway so the LXC's network config matches `bootstrap-config.yml`.
-12. Tear down the host-side NAT.
+1. Validate env + deps.
+2. Fix the host's apt repos (pve-enterprise → pve-no-subscription) and install rclone / yq / iptables / ifupdown2.
+3. Configure rclone B2 remotes and pull `bootstrap-config.yml`.
+4. Create the host's additional bridges (`host.bridges[*]` — typically vmbr1) into `/etc/network/interfaces.d/` and reload networking.
+5. Fetch `authorized_keys` from the B2 meta mirror, install it on the host, and stage it for LXC injection.
+6. Apply the temporary host-side MASQUERADE so the new LXC has a path to B2 even with the LAN firewall down.
+7. Download the Debian template if missing.
+8. `pct create` the LXC and start it (with `gw=<host bridge IP>`, `--nameserver 1.1.1.1`).
+9. Install PBS inside the LXC.
+10. **Restore chunks** — long-running. Expect 10s of minutes to many hours depending on bucket size and your egress.
+11. Register the datastore by writing `/etc/proxmox-backup/datastore.cfg` and reloading the proxy.
+12. Create the PBS API user + token + `DatastoreAdmin` ACL.
+13. Add the PVE storage entry pointing at PBS (with the freshly-captured token + TLS fingerprint).
+14. `pct set --net0` back to the declared gateway so the LXC's network config matches `bootstrap-config.yml`.
+15. Tear down the host-side MASQUERADE.
 
 When the script returns, PBS is fully wired into PVE — you can immediately browse backups in the PVE GUI and start restores.
 

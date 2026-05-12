@@ -1,9 +1,19 @@
 # shellcheck shell=bash
 # Create the PBS LXC via pct.
 #
-# Uses values exported by config.sh + script-constant defaults from bootstrap.sh.
-# IP is taken from config as a bare address (e.g. 10.80.60.200) and combined
-# with PBS_IP_CIDR (default /24) since pct net0 needs CIDR notation.
+# Values from bootstrap-config.yml drive:
+#   - vmid, hostname, bridge, ip, gateway (network)
+#   - rootfs_size, rootfs_storage (disk)
+#
+# Values from script-constants / env (memory, cores) cover anything not in
+# the steady-state config.
+#
+# IP is taken from config as a bare address; it's combined with PBS_IP_CIDR
+# (default /24) since pct net0 needs CIDR notation.
+#
+# The SSH pubkey source is $AUTH_KEYS_FILE, prepared by host-ssh.sh.
+# network-bridge.sh may override PBS_GATEWAY_OVERRIDE / PBS_DNS_OVERRIDE to
+# route the LXC through the host while the real LAN gateway is dead.
 
 : "${PBS_IP_CIDR:=24}"
 
@@ -25,17 +35,17 @@ lxc_create() {
         extra_args+=(--nameserver "$PBS_DNS_OVERRIDE")
     fi
 
-    log_info "creating LXC $PBS_VMID ($PBS_HOSTNAME) gw=$gateway"
+    log_info "creating LXC $PBS_VMID ($PBS_HOSTNAME) rootfs=${PBS_ROOTFS_SIZE}GB@${PBS_ROOTFS_STORAGE} gw=$gateway"
     pct create "$PBS_VMID" "$template_path" \
         --hostname "$PBS_HOSTNAME" \
         --cores "$PBS_CORES" \
         --memory "$PBS_MEMORY" \
-        --rootfs "$PBS_ROOTFS_STORAGE:$PBS_ROOTFS_SIZE" \
+        --rootfs "${PBS_ROOTFS_STORAGE}:${PBS_ROOTFS_SIZE}" \
         --net0 "name=eth0,bridge=$PBS_BRIDGE,ip=$PBS_IP/$PBS_IP_CIDR,gw=$gateway" \
         --onboot 1 \
         --unprivileged 1 \
         --features keyctl=1,nesting=0 \
-        --ssh-public-keys "$PBS_SSH_PUBKEY_FILE" \
+        --ssh-public-keys "$AUTH_KEYS_FILE" \
         "${extra_args[@]}" \
         --start 0
 

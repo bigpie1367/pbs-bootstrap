@@ -1,20 +1,16 @@
 # shellcheck shell=bash
-# Install rclone on the Proxmox host and configure B2 remotes.
+# Configure B2 remotes for rclone on the Proxmox host.
 #
 # Two remotes:
-#   meta   — bootstrap-config.yml lives here
-#   chunks — PBS datastore chunks (copied into LXC later)
+#   meta   — bootstrap-config.yml + authorized_keys live here
+#   chunks — PBS datastore chunks
+#
+# rclone itself is installed by host_apt_setup (runs before this).
 
 RCLONE_CONF_DIR="/root/.config/rclone"
 RCLONE_CONF="$RCLONE_CONF_DIR/rclone.conf"
 
 rclone_setup_host() {
-    if ! command -v rclone >/dev/null; then
-        log_info "installing rclone via apt"
-        apt-get update -qq
-        apt-get install -y -qq rclone
-    fi
-
     mkdir -p "$RCLONE_CONF_DIR"
     chmod 700 "$RCLONE_CONF_DIR"
 

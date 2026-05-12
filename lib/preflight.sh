@@ -1,5 +1,8 @@
 # shellcheck shell=bash
 # Validate environment before doing any work.
+#
+# Only checks what's required *before* host_apt_setup can run — anything else
+# (rclone, yq, iptables) is installed/verified in host_apt_setup.
 
 preflight_check() {
     log_info "preflight: checking environment"
@@ -18,9 +21,6 @@ preflight_check() {
     for cmd in pct pveam curl git awk; do
         command -v "$cmd" >/dev/null || die "missing command: $cmd"
     done
-
-    [[ -f "$PBS_SSH_PUBKEY_FILE" ]] \
-        || die "ssh pubkey file not found: $PBS_SSH_PUBKEY_FILE (set PBS_SSH_PUBKEY_FILE)"
 
     log_info "preflight: OK"
 }

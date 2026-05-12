@@ -6,15 +6,20 @@ Designed for the case where you've lost everything except your B2 bucket: bare-m
 
 ## What it does
 
-1. Pulls `bootstrap-config.yml` from the B2 *meta* bucket — VMID, hostname, network, datastore path.
-2. Creates an unprivileged Debian 12 LXC on the Proxmox host (`pct create`).
-3. Installs `proxmox-backup-server` inside the LXC (no-subscription repo).
-4. Restores chunks from the B2 *chunks* bucket via `rclone copy` (foreground, with progress), `chown`ed to `backup:backup`.
-5. Registers the datastore with PBS (`/etc/proxmox-backup/datastore.cfg`).
-6. Creates a PBS API user + token + `DatastoreAdmin` ACL.
-7. Adds a PBS storage entry to PVE (`/etc/pve/storage.cfg`) using the new token + the PBS TLS fingerprint.
+1. Fixes the Proxmox host's apt repos (pve-enterprise → pve-no-subscription) and installs deps (rclone, yq, iptables, ifupdown2).
+2. Configures rclone B2 remotes on the host and pulls `bootstrap-config.yml` from the meta bucket.
+3. Materializes the host's additional bridges (`host.bridges[*]` from config — typically vmbr1) into `/etc/network/interfaces.d/` and reloads.
+4. Fetches the operator's `authorized_keys` from B2 meta and installs it on the host + stages it for LXC injection.
+5. Enables host-side `iptables` MASQUERADE so the new LXC has internet even with the LAN firewall down.
+6. Creates an unprivileged Debian 12 LXC on the Proxmox host (`pct create`) sized to `pbs.rootfs_*` from config.
+7. Installs `proxmox-backup-server` inside the LXC.
+8. Restores chunks from the B2 *chunks* bucket via `rclone copy` (foreground, with progress), `chown`ed to `backup:backup`.
+9. Registers the datastore with PBS (`/etc/proxmox-backup/datastore.cfg`).
+10. Creates a PBS API user + token + `DatastoreAdmin` ACL.
+11. Adds a PBS storage entry to PVE (`/etc/pve/storage.cfg`) using the new token + the PBS TLS fingerprint.
+12. Restores the LXC's network to the declared steady-state gateway + tears down the host masquerade.
 
-After step 7 you have a working PVE → PBS chain. From the PVE GUI you can browse the restored backup groups and restore any VM/CT — typically your **LAN firewall VM first** so the rest of the homelab can be brought back by your normal IaC tooling.
+After step 11 you have a working PVE → PBS chain. From the PVE GUI you can browse the restored backup groups and restore any VM/CT — typically your **LAN firewall VM first** so the rest of the homelab can be brought back by your normal IaC tooling.
 
 Out of scope (handled by your post-bootstrap ansible/terraform):
 
@@ -27,27 +32,39 @@ The scope is set by the DR chicken-and-egg: in a real disaster the LAN firewall 
 
 ## Requirements
 
-- Proxmox VE host (anything that ships `pct` and `pveam`).
-- Network egress to B2 from the Proxmox host *and* from the new LXC.
+- Proxmox VE host (fresh install OK — the installer's network ceremony provides vmbr0 with internet).
+- Network egress to B2 from the Proxmox host.
 - Two B2 application keys with narrow scope:
-  - One read-only on the *chunks* bucket.
-  - One read-write on the *meta* bucket (or read-only if you don't need ansible to update the config).
-- An SSH pubkey to inject into the LXC (defaults to `~/.ssh/authorized_keys` on the host).
+  - Chunks bucket: read-only is enough for the script itself; read-write is needed for steady-state syncs (out of scope here).
+  - Meta bucket: read-only is enough during bootstrap; read-write is needed for ansible-driven mirror updates.
 - `bootstrap-config.yml` already present in your meta bucket. Format:
 
   ```yaml
   pbs:
-    vmid:     200
-    hostname: pbs
-    bridge:   vmbr0
-    ip:       10.80.60.200
-    gateway:  10.80.60.1
+    vmid:           200
+    hostname:       pbs
+    bridge:         vmbr1
+    ip:             10.80.60.200
+    gateway:        10.80.60.1
     datastore_name: system-backup
     datastore_path: /mnt/pbs_backup
+    rootfs_size:    100
+    rootfs_storage: local
+  host:
+    bridges:
+      - name:         vmbr1
+        address:      10.80.60.254/24
+        bridge_ports: none
+        static_routes:
+          - { subnet: 10.80.80.0/24, gateway: 10.80.60.1 }
   b2:
     chunks_bucket: my-pbs-chunks
     meta_bucket:   my-pbs-meta
   ```
+
+  The `host.bridges` section defines bridges the host needs *in addition to* vmbr0 (which the PVE installer already created). vmbr0 is intentionally absent from this section — bootstrap doesn't touch it.
+
+- `authorized_keys` mirror in the meta bucket (optional but recommended): a plain-text file with one SSH public key per line. Used to seed both the host's `/root/.ssh/authorized_keys` and the new PBS LXC. Without it, bootstrap falls back to `$PBS_SSH_PUBKEY_FILE` (env var pointing at a local file).
 
   In our homelab this is rendered automatically by the ansible role on every apply.
 
@@ -78,14 +95,13 @@ Defaults are baked in as `: "${VAR:=default}"` shell expansions — override by 
 |-------------------------|-----------------------------------------------|-----------------------------------------------------------|
 | `PBS_TEMPLATE`          | `debian-12-standard_12.7-1_amd64.tar.zst`     | LXC template (must be available via `pveam`).             |
 | `PBS_TEMPLATE_STORAGE`  | `local`                                       | Storage holding the template.                              |
-| `PBS_ROOTFS_STORAGE`    | `local-lvm`                                   | Storage backing the LXC rootfs.                            |
-| `PBS_ROOTFS_SIZE`       | `64` (GB)                                     | Must be large enough to hold restored chunks.              |
 | `PBS_MEMORY`            | `2048` (MB)                                   | LXC RAM allocation.                                        |
 | `PBS_CORES`             | `2`                                           | LXC CPU cores.                                             |
 | `PBS_IP_CIDR`           | `24`                                          | CIDR appended to the bare IP from config.                  |
-| `PBS_SSH_PUBKEY_FILE`   | `$HOME/.ssh/authorized_keys`                  | SSH pubkey injected at LXC create time.                    |
-| `PBS_META_BUCKET`       | `siroh-pbs-meta`                              | B2 bucket holding `bootstrap-config.yml`.                  |
+| `PBS_SSH_PUBKEY_FILE`   | _none_                                        | Optional fallback file for SSH keys if B2 mirror is empty. |
+| `PBS_META_BUCKET`       | `siroh-pbs-meta`                              | B2 bucket holding `bootstrap-config.yml` + `authorized_keys`. |
 | `PBS_CONFIG_OBJECT`     | `bootstrap-config.yml`                        | Object key inside the meta bucket.                         |
+| `PBS_AUTH_KEYS_OBJECT`  | `authorized_keys`                             | Object key for the SSH keys mirror inside the meta bucket. |
 | `PBS_NAT_OUT_IFACE`     | `vmbr0`                                       | Host interface with working upstream (used for MASQUERADE).|
 | `PBS_NAT_DNS`           | `1.1.1.1`                                     | Temporary resolver injected into the LXC.                  |
 | `PBS_GATEWAY_OVERRIDE`  | _auto-detected from `PBS_BRIDGE`_             | Explicit LXC gateway override during bootstrap.            |
