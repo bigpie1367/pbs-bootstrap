@@ -1,9 +1,11 @@
 # shellcheck shell=bash
-# Pull bootstrap-config.yml from B2 meta bucket and export the scalar fields
-# as env vars. Complex (list-valued) sections like host.bridges are left in
-# the file and read directly by the consumers (host-network.sh) via yq.
+# Pull bootstrap-config.yml via the source resolver and export scalar fields
+# as env vars. The source is whatever PBS_CONFIG points at — URL, GitHub
+# repo, b2://, s3://, local path, or paste-staged temp file. List-valued
+# sections (host.bridges) are read directly by consumers (host-network.sh)
+# via yq.
 #
-# Schema (rendered by the homelab ansible pbs role):
+# Schema:
 #
 #   pbs:
 #     vmid: 200
@@ -15,6 +17,9 @@
 #     datastore_path: /mnt/pbs_backup
 #     rootfs_size: 100
 #     rootfs_storage: local
+#     cores: 2
+#     memory_dedicated: 2048
+#     memory_swap: 1024
 #   host:
 #     bridges:
 #       - name: vmbr1
@@ -22,20 +27,18 @@
 #         bridge_ports: none
 #         static_routes:
 #           - { subnet: 10.80.80.0/24, gateway: 10.80.60.1 }
-#   b2:
-#     chunks_bucket: siroh-pbs
-#     meta_bucket:   siroh-pbs-meta
-
-: "${PBS_META_BUCKET:=siroh-pbs-meta}"
-: "${PBS_CONFIG_OBJECT:=bootstrap-config.yml}"
+#   storage:
+#     type:          b2          # or s3
+#     endpoint:      https://... # required when type=s3
+#     region:        us-east-005 # required when type=s3
+#     chunks_bucket: my-pbs-chunks
 
 PBS_CONFIG_FILE=""
 
 config_pull() {
     local dest="$1"
-    log_info "pulling $PBS_CONFIG_OBJECT from meta:$PBS_META_BUCKET"
-    rclone copyto "meta:$PBS_META_BUCKET/$PBS_CONFIG_OBJECT" "$dest"
-    [[ -s "$dest" ]] || die "bootstrap-config.yml is empty or missing"
+    log_info "resolving bootstrap-config from: $PBS_CONFIG"
+    resolve_source "$PBS_CONFIG" "$dest" config
     PBS_CONFIG_FILE="$dest"
     export PBS_CONFIG_FILE
 }
@@ -54,24 +57,37 @@ config_export() {
     PBS_CORES="$(yq -r '.pbs.cores // ""' "$f")"
     PBS_MEMORY_DEDICATED="$(yq -r '.pbs.memory_dedicated // ""' "$f")"
     PBS_MEMORY_SWAP="$(yq -r '.pbs.memory_swap // ""' "$f")"
-    PBS_B2_CHUNKS_BUCKET="$(yq -r '.b2.chunks_bucket // ""' "$f")"
-    PBS_B2_META_BUCKET="$(yq -r '.b2.meta_bucket // ""' "$f")"
+
+    # storage.* in the config can mirror the runtime PBS_STORAGE_TYPE/ENDPOINT/
+    # REGION but the operator-supplied env vars take priority (they reflect
+    # the live decision the operator just made, not the steady-state default).
+    : "${PBS_STORAGE_TYPE:=$(yq -r '.storage.type // "b2"' "$f")}"
+    : "${PBS_STORAGE_ENDPOINT:=$(yq -r '.storage.endpoint // ""' "$f")}"
+    : "${PBS_STORAGE_REGION:=$(yq -r '.storage.region // ""' "$f")}"
+    : "${PBS_CHUNKS_BUCKET:=$(yq -r '.storage.chunks_bucket // .b2.chunks_bucket // ""' "$f")}"
 
     local missing=()
     for v in PBS_VMID PBS_HOSTNAME PBS_BRIDGE PBS_IP PBS_GATEWAY \
              PBS_DATASTORE_NAME PBS_DATASTORE_PATH \
              PBS_ROOTFS_SIZE PBS_ROOTFS_STORAGE \
              PBS_CORES PBS_MEMORY_DEDICATED PBS_MEMORY_SWAP \
-             PBS_B2_CHUNKS_BUCKET PBS_B2_META_BUCKET; do
+             PBS_STORAGE_TYPE PBS_CHUNKS_BUCKET; do
         [[ -n "${!v:-}" ]] || missing+=("$v")
     done
+
+    if [[ "$PBS_STORAGE_TYPE" == "s3" ]]; then
+        [[ -n "$PBS_STORAGE_ENDPOINT" ]] || missing+=(storage.endpoint)
+        [[ -n "$PBS_STORAGE_REGION" ]]   || missing+=(storage.region)
+    fi
+
     ((${#missing[@]} == 0)) || die "config missing fields: ${missing[*]}"
 
     export PBS_VMID PBS_HOSTNAME PBS_BRIDGE PBS_IP PBS_GATEWAY \
            PBS_DATASTORE_NAME PBS_DATASTORE_PATH \
            PBS_ROOTFS_SIZE PBS_ROOTFS_STORAGE \
            PBS_CORES PBS_MEMORY_DEDICATED PBS_MEMORY_SWAP \
-           PBS_B2_CHUNKS_BUCKET PBS_B2_META_BUCKET
+           PBS_STORAGE_TYPE PBS_STORAGE_ENDPOINT PBS_STORAGE_REGION \
+           PBS_CHUNKS_BUCKET
 
-    log_info "config: vmid=$PBS_VMID host=$PBS_HOSTNAME ip=$PBS_IP ${PBS_CORES}C/${PBS_MEMORY_DEDICATED}M+${PBS_MEMORY_SWAP}swap rootfs=${PBS_ROOTFS_SIZE}GB@${PBS_ROOTFS_STORAGE} datastore=$PBS_DATASTORE_NAME"
+    log_info "config: vmid=$PBS_VMID host=$PBS_HOSTNAME ip=$PBS_IP storage=$PBS_STORAGE_TYPE chunks=$PBS_CHUNKS_BUCKET"
 }

@@ -8,13 +8,20 @@
 # the operator's playbook, out of scope here.
 #
 # Usage (on Proxmox host, web shell or SSH):
-#   export B2_PBS_META_KEY_ID=... B2_PBS_META_KEY=...
-#   export B2_PBS_KEY_ID=...      B2_PBS_KEY=...
-#   curl -sSL https://raw.githubusercontent.com/bigpie1367/pbs-bootstrap/main/bootstrap.sh | bash
 #
-# Or clone + run locally:
-#   git clone https://github.com/bigpie1367/pbs-bootstrap && cd pbs-bootstrap
-#   ./bootstrap.sh
+#   # Source URIs — each accepts:
+#   #   b2://bucket/path | s3://bucket/path | github:owner/repo/branch/path
+#   #   | https://... | /abs/path | (auth_keys only) <github-user> | skip
+#   export PBS_CONFIG=b2://my-pbs-meta/bootstrap-config.yml
+#   export PBS_AUTH_KEYS=myuser
+#
+#   # Chunks credentials (always required)
+#   export PBS_CHUNKS_KEY_ID=... PBS_CHUNKS_KEY=...
+#
+#   # Meta credentials (only if PBS_CONFIG or PBS_AUTH_KEYS uses b2:// / s3://)
+#   export PBS_META_KEY_ID=...   PBS_META_KEY=...
+#
+#   bash <(curl -sSL https://raw.githubusercontent.com/bigpie1367/pbs-bootstrap/main/bootstrap.sh)
 #
 set -euo pipefail
 
@@ -23,9 +30,10 @@ set -euo pipefail
 : "${PBS_TEMPLATE_STORAGE:=local}"
 : "${PBS_REPO_URL:=https://github.com/bigpie1367/pbs-bootstrap}"
 : "${PBS_REPO_BRANCH:=main}"
+: "${PBS_STORAGE_TYPE:=b2}"          # b2 | s3
+# PBS_STORAGE_ENDPOINT / PBS_STORAGE_REGION required when type=s3
 # PBS_ROOTFS_SIZE / PBS_ROOTFS_STORAGE / PBS_CORES / PBS_MEMORY_DEDICATED /
 # PBS_MEMORY_SWAP all come from bootstrap-config.yml (terraform outputs).
-# PBS_SSH_PUBKEY_FILE is an optional fallback when B2 mirror is missing.
 
 # --- Locate libs (curl|bash → auto-clone) -----------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || SCRIPT_DIR=""
@@ -42,6 +50,8 @@ fi
 
 # shellcheck source=lib/log.sh
 source "$SCRIPT_DIR/lib/log.sh"
+# shellcheck source=lib/source-resolver.sh
+source "$SCRIPT_DIR/lib/source-resolver.sh"
 # shellcheck source=lib/preflight.sh
 source "$SCRIPT_DIR/lib/preflight.sh"
 # shellcheck source=lib/host-apt.sh
@@ -87,14 +97,14 @@ host_apt_setup
 log_header "Configuring rclone on host"
 rclone_setup_host
 
-log_header "Pulling bootstrap-config.yml from B2"
+log_header "Pulling bootstrap-config.yml"
 config_pull "$CONFIG_FILE"
 config_export "$CONFIG_FILE"
 
 log_header "Configuring host network bridges"
 host_network_setup
 
-log_header "Fetching operator SSH keys from B2"
+log_header "Fetching operator SSH keys"
 fetch_authorized_keys
 install_authorized_keys_on_host
 
@@ -108,7 +118,7 @@ lxc_wait_network
 log_header "Installing Proxmox Backup Server"
 pbs_install
 
-log_header "Restoring chunks from B2 (foreground — long-running)"
+log_header "Restoring chunks (foreground — long-running)"
 chunks_restore
 
 log_header "Registering datastore $PBS_DATASTORE_NAME with PBS"
