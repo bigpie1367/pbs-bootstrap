@@ -14,7 +14,11 @@ bash <(curl -sSL https://raw.githubusercontent.com/bigpie1367/pbs-bootstrap/main
 
 프롬프트 응답 → 끝. `pvesm status -storage pbs` 가 `active` 면 OK, PVE GUI 의 `pbs` storage 에 backup 그룹 보임.
 
-**전제**: PVE 호스트 (vmbr0 가 공유기 가리킴, 복구 대상 LAN firewall VM 이 아닌); chunks bucket 키 (B2 native 또는 S3-compatible); `bootstrap-config.yml` + SSH 키 둘 곳 (GitHub repo, B2/S3, 로컬 등).
+**전제조건**
+
+- PVE 호스트 — `vmbr0` 가 공유기 (또는 ISP 모뎀) 가리킴, 복구 대상인 LAN firewall VM 이 아닌.
+- Chunks bucket 키 — B2 native 또는 S3-compatible (AWS, MinIO, R2, Wasabi, B2 via S3).
+- `bootstrap-config.yml` + SSH 키 둘 곳 — GitHub repo, B2/S3 bucket, 또는 로컬 파일.
 
 ## 파이프라인
 

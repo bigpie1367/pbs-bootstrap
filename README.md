@@ -14,7 +14,11 @@ bash <(curl -sSL https://raw.githubusercontent.com/bigpie1367/pbs-bootstrap/main
 
 Answer the prompts. Done when `pvesm status -storage pbs` is `active` and the PVE GUI's `pbs` storage shows your backup groups.
 
-**Prereqs**: fresh PVE host (vmbr0 pointed at your upstream router, not the LAN firewall you're recovering); chunks bucket key (B2 native or any S3-compatible); somewhere to host `bootstrap-config.yml` + your SSH keys (GitHub repo, B2/S3, or local).
+**Prereqs**
+
+- Fresh PVE host — `vmbr0` pointed at your upstream router (consumer router / ISP modem), not the LAN firewall VM you're recovering.
+- Chunks bucket key — B2 native or any S3-compatible (AWS, MinIO, R2, Wasabi, B2 via S3).
+- Somewhere to host `bootstrap-config.yml` + your SSH keys — GitHub repo, B2/S3 bucket, or local file.
 
 ## Pipeline
 
