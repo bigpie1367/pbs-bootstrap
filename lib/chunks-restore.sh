@@ -5,6 +5,12 @@
 # - Run rclone inside the LXC so the network traffic is on the LXC's IP
 #   (matches steady-state ansible sync behavior).
 # - chown to backup:backup after copy — PBS refuses chunks owned by root.
+# - Preallocate .chunks/0000..ffff sharded directories — `proxmox-backup-manager
+#   datastore create` would do this automatically, but we don't use that
+#   command (existing chunks on disk would make it refuse). B2/S3 doesn't
+#   store empty dirs, so rclone-copied chunks only populate shards that had
+#   at least one chunk. Missing shards make later backups fail with
+#   `mkstemp ... ENOENT` on the first chunk that hashes there.
 
 chunks_restore() {
     log_info "installing rclone inside LXC"
@@ -31,6 +37,16 @@ EOF
         --transfers 16 \
         --checkers 32 \
         --fast-list
+
+    log_info "preallocating .chunks/0000..ffff sharded directories (PBS layout)"
+    pct exec "$PBS_VMID" -- bash -s "$PBS_DATASTORE_PATH" <<'EOF'
+set -eu
+DPATH="$1"
+mkdir -p "$DPATH/.chunks"
+cd "$DPATH/.chunks"
+# xargs auto-chunks args under ARG_MAX. mkdir -p is idempotent.
+seq 0 65535 | awk '{ printf "%04x\n", $1 }' | xargs mkdir -p
+EOF
 
     log_info "chowning datastore to backup:backup"
     pct exec "$PBS_VMID" -- chown -R backup:backup "$PBS_DATASTORE_PATH"
